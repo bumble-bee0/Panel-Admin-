@@ -1,0 +1,106 @@
+name: Build Admin Panel APK
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'admin-app.zip'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-admin-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Siapkan folder www-admin dari zip
+        run: |
+          rm -rf www-admin
+          mkdir www-admin
+          if [ -f admin-app.zip ]; then
+            unzip -o admin-app.zip -d www-admin
+            rm admin-app.zip
+          fi
+          if [ ! -f www-admin/index.html ]; then
+            echo '<!DOCTYPE html><html><body style="background:#0b0b14;color:#fff;font-family:sans-serif;">Memuat LoveDare Admin...</body></html>' > www-admin/index.html
+          fi
+
+      - name: Commit hasil ekstrak
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Auto-extract admin zip"
+          file_pattern: "www-admin/*"
+          push_options: '--force'
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Buat project Capacitor
+        run: |
+          rm -rf admin-project
+          mkdir -p admin-project
+          cd admin-project
+          npm init -y
+          npm install @capacitor/core @capacitor/cli @capacitor/android
+          npx cap init "LoveDare Admin" "com.lovedare.admin" --web-dir=../www-admin
+          npx cap add android
+
+      - name: Set URL server ke capacitor.config.json
+        run: |
+          cd admin-project
+          node -e "
+          const fs = require('fs');
+          const cfg = JSON.parse(fs.readFileSync('capacitor.config.json', 'utf8'));
+          cfg.server = { url: 'https://lovedare-api.lovedare.workers.dev', cleartext: true };
+          fs.writeFileSync('capacitor.config.json', JSON.stringify(cfg, null, 2));
+          "
+
+      - name: Fix konflik duplicate Kotlin stdlib
+        run: |
+          cat >> admin-project/android/app/build.gradle << 'EOF'
+
+          configurations.all {
+              exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk7'
+              exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk8'
+          }
+          EOF
+
+      - name: Sync ke project Android
+        run: |
+          cd admin-project
+          npx cap sync android
+
+      - name: Build APK
+        run: |
+          cd admin-project/android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload APK sebagai artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lovedare-admin-apk
+          path: admin-project/android/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Buat Release dengan APK Admin
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: admin-latest
+          name: "LoveDare Admin APK"
+          make_latest: false
+          files: admin-project/android/app/build/outputs/apk/debug/app-debug.apk
