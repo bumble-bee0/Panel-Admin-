@@ -17,23 +17,27 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Siapkan folder www-admin dari zip
+      - name: Siapkan folder www-admin & resources dari zip
         run: |
-          rm -rf www-admin
+          rm -rf www-admin resources
           mkdir www-admin
           if [ -f admin-app.zip ]; then
-            unzip -o admin-app.zip -d www-admin
+            unzip -o admin-app.zip -d extracted-admin
+            cp extracted-admin/index.html www-admin/index.html 2>/dev/null || true
+            mkdir -p resources
+            cp extracted-admin/resources/icon.png resources/icon.png 2>/dev/null || true
+            cp extracted-admin/resources/splash.png resources/splash.png 2>/dev/null || true
             rm admin-app.zip
           fi
           if [ ! -f www-admin/index.html ]; then
-            echo '<!DOCTYPE html><html><body style="background:#0b0b14;color:#fff;font-family:sans-serif;">Memuat LoveDare Admin...</body></html>' > www-admin/index.html
+            echo '<!DOCTYPE html><html><body style="background:#181723;color:#fff;font-family:sans-serif;">Memuat LoveDare Admin...</body></html>' > www-admin/index.html
           fi
 
       - name: Commit hasil ekstrak
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "Auto-extract admin zip"
-          file_pattern: "www-admin/*"
+          file_pattern: "www-admin/* resources/*"
           push_options: '--force'
 
       - name: Setup Node
@@ -47,16 +51,13 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Buat project Capacitor
         run: |
           rm -rf admin-project
           mkdir -p admin-project
           cd admin-project
           npm init -y
-          npm install @capacitor/core @capacitor/cli @capacitor/android
+          npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/assets
           npx cap init "LoveDare Admin" "com.lovedare.admin" --web-dir=../www-admin
           npx cap add android
 
@@ -69,6 +70,16 @@ jobs:
           cfg.server = { url: 'https://lovedare-api.lovedare.workers.dev', cleartext: true };
           fs.writeFileSync('capacitor.config.json', JSON.stringify(cfg, null, 2));
           "
+
+      - name: Generate icon & splash screen dari resources/
+        run: |
+          if [ -f resources/icon.png ]; then
+            mkdir -p admin-project/resources
+            cp resources/icon.png admin-project/resources/icon.png
+            cp resources/splash.png admin-project/resources/splash.png
+            cd admin-project
+            npx @capacitor/assets generate --android
+          fi
 
       - name: Fix konflik duplicate Kotlin stdlib
         run: |
